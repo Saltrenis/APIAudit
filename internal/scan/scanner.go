@@ -50,6 +50,10 @@ func GetScanner(framework string) (Scanner, error) {
 		return &StdlibScanner{}, nil
 	case "express":
 		return &ExpressScanner{}, nil
+	case "fastify":
+		return &FastifyScanner{}, nil
+	case "koa":
+		return &KoaScanner{}, nil
 	case "nestjs":
 		return &NestJSScanner{}, nil
 	case "fastapi":
