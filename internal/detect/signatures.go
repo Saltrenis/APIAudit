@@ -9,6 +9,10 @@ type Signature struct {
 	Framework string
 	// Files is a list of filenames whose existence signals this framework.
 	Files []string
+	// FileGlobs is a list of glob patterns (relative to the project root) whose
+	// matched files are also searched for Patterns. This enables detection when
+	// dependency files are split across subdirectories (e.g. requirements/*.txt).
+	FileGlobs []string
 	// Patterns is a list of substrings to search within those files.
 	Patterns []string
 	// Priority determines which signature wins when multiple match. Higher wins.
@@ -23,7 +27,7 @@ var signatures = []Signature{
 	{
 		Language:  "Go",
 		Framework: "gin",
-		Files:     []string{"go.mod", "go.sum"},
+		Files:     []string{"go.mod"},
 		Patterns:  []string{"github.com/gin-gonic/gin"},
 		Priority:  90,
 	},
@@ -93,6 +97,7 @@ var signatures = []Signature{
 		Language:  "Python",
 		Framework: "fastapi",
 		Files:     []string{"requirements.txt", "pyproject.toml", "setup.py"},
+		FileGlobs: []string{"requirements/*.txt", "requirements/**/*.txt"},
 		Patterns:  []string{"fastapi"},
 		Priority:  90,
 	},
@@ -100,6 +105,7 @@ var signatures = []Signature{
 		Language:  "Python",
 		Framework: "django-rest-framework",
 		Files:     []string{"requirements.txt", "pyproject.toml", "setup.py"},
+		FileGlobs: []string{"requirements/*.txt", "requirements/**/*.txt"},
 		Patterns:  []string{"djangorestframework", "rest_framework"},
 		Priority:  85,
 	},
@@ -107,6 +113,7 @@ var signatures = []Signature{
 		Language:  "Python",
 		Framework: "flask",
 		Files:     []string{"requirements.txt", "pyproject.toml", "setup.py"},
+		FileGlobs: []string{"requirements/*.txt", "requirements/**/*.txt"},
 		Patterns:  []string{"flask", "Flask"},
 		Priority:  70,
 	},

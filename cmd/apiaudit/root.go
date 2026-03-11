@@ -8,6 +8,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version is set at build time via -ldflags "-X main.version=x.y.z".
+// It defaults to "dev" for local builds.
+var version = "dev"
+
 // globalFlags holds values bound to the persistent global flags.
 var globalFlags struct {
 	Dir        string
@@ -21,8 +25,9 @@ var globalFlags struct {
 
 // rootCmd is the base command. All sub-commands are attached to it.
 var rootCmd = &cobra.Command{
-	Use:   "apiaudit",
-	Short: "apiaudit — detect, scan, and document your REST API",
+	Use:     "apiaudit",
+	Version: version,
+	Short:   "apiaudit — detect, scan, and document your REST API",
 	Long: `apiaudit is a zero-configuration CLI that detects your web framework,
 extracts all route definitions, generates an OpenAPI spec, and reports
 inconsistencies between your backend and frontend.

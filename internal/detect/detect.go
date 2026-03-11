@@ -81,18 +81,33 @@ func matchSignatures(dir string) (Signature, int) {
 func scoreSignature(dir string, sig Signature) int {
 	patternHits := 0
 
-	for _, filename := range sig.Files {
-		fpath := filepath.Join(dir, filename)
+	scoreFile := func(fpath string) {
 		data, err := os.ReadFile(fpath)
 		if err != nil {
-			continue
+			return
 		}
-
 		content := string(data)
 		for _, pattern := range sig.Patterns {
 			if strings.Contains(content, pattern) {
 				patternHits++
 			}
+		}
+	}
+
+	for _, filename := range sig.Files {
+		scoreFile(filepath.Join(dir, filename))
+	}
+
+	// Also search files matched by glob patterns relative to the project root.
+	// This handles projects that split dependency files across subdirectories
+	// (e.g. requirements/*.txt in Flask/FastAPI projects).
+	for _, glob := range sig.FileGlobs {
+		matches, err := filepath.Glob(filepath.Join(dir, glob))
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			scoreFile(m)
 		}
 	}
 

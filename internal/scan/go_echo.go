@@ -19,12 +19,17 @@ func (s *EchoScanner) Name() string { return "echo" }
 //	e.GET("/path", handler)
 //	g := e.Group("/prefix")
 //	g.POST("/path", handler)
+//	g.POST("", handler)  // empty path — resolves to the group prefix itself
 var (
 	echoRouteRe = regexp.MustCompile(
-		`(?i)\.\s*(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s*\(\s*"([^"]+)"\s*,\s*([^)]+)\)`,
+		`(?i)(\w+)\.\s*(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s*\(\s*"([^"]*)"\s*,\s*([^)]+)\)`,
 	)
-	echoGroupRe = regexp.MustCompile(
-		`\.Group\s*\(\s*"([^"]+)"`,
+	// echoGroupAssignRe captures variable-assigned Group calls.
+	// Capture groups: 1=lhs var, 2=base var, 3=path prefix.
+	// e.g. `v1 := e.Group("/api")` → lhs="v1", base="e", prefix="/api"
+	// also handles middleware args: `g := e.Group("/path", mw1)`
+	echoGroupAssignRe = regexp.MustCompile(
+		`(\w+)\s*:?=\s*(\w+)\.Group\s*\(\s*"([^"]*)"`,
 	)
 )
 
@@ -62,9 +67,8 @@ func scanEchoFile(path string) ([]Route, error) {
 	defer f.Close()
 
 	var (
-		routes      []Route
-		prefixStack []string
-		lines       []string
+		routes []Route
+		lines  []string
 	)
 
 	scanner := bufio.NewScanner(f)
@@ -75,27 +79,51 @@ func scanEchoFile(path string) ([]Route, error) {
 		return nil, err
 	}
 
+	// First pass: build a variable-to-full-prefix map from Group assignments
+	// within this file. For example:
+	//   v1 := e.Group("/api")          → varPrefix["v1"] = "/api"
+	//   users := v1.Group("/users")    → varPrefix["users"] = "/api/users"
+	//
+	// Groups received as function parameters (e.g. `func(h *Handler) Register(v1 *echo.Group)`)
+	// are not tracked here; routes registered on those variables appear with only
+	// the suffix path (no prefix), which is accurate for most per-file scans.
+	varPrefix := make(map[string]string)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if m := echoGroupAssignRe.FindStringSubmatch(trimmed); m != nil {
+			lhsVar, baseVar, prefix := m[1], m[2], m[3]
+			if parentPrefix, ok := varPrefix[baseVar]; ok {
+				varPrefix[lhsVar] = joinPaths(parentPrefix, prefix)
+			} else {
+				varPrefix[lhsVar] = prefix
+			}
+		}
+	}
+
+	// Second pass: extract route registrations.
 	for i, line := range lines {
 		lineNum := i + 1
 		trimmed := strings.TrimSpace(line)
-
-		// Track group prefixes.
-		if m := echoGroupRe.FindStringSubmatch(trimmed); m != nil {
-			prefixStack = append(prefixStack, m[1])
-		}
-
-		if trimmed == "}" && len(prefixStack) > 0 {
-			prefixStack = prefixStack[:len(prefixStack)-1]
-		}
 
 		m := echoRouteRe.FindStringSubmatch(trimmed)
 		if m == nil {
 			continue
 		}
 
-		method := strings.ToUpper(m[1])
-		routePath := joinPaths(currentPrefix(prefixStack), m[2])
-		handler := lastHandler(strings.TrimSpace(m[3]))
+		receiverVar := m[1]
+		method := strings.ToUpper(m[2])
+		rawPath := m[3]
+		handlerRaw := strings.TrimSpace(m[4])
+
+		// Echo allows "" as a path equivalent to the group prefix itself;
+		// normalise so callers always see a rooted path.
+		if rawPath == "" {
+			rawPath = "/"
+		}
+
+		prefix := varPrefix[receiverVar] // empty string when not a known group var
+		routePath := joinPaths(prefix, rawPath)
+		handler := lastHandler(handlerRaw)
 		hasSwagger := linesHaveSwagger(lines, i, 20)
 
 		routes = append(routes, Route{

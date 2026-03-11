@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/Saltrenis/APIAudit/internal/detect"
 	"github.com/Saltrenis/APIAudit/internal/repo"
@@ -94,14 +96,64 @@ func joinStrings(ss []string) string {
 }
 
 // writeOutput writes content to outPath, or to stdout if outPath is empty.
+//
+// When outPath is a directory (or empty string), a dated filename is
+// auto-generated using the current date and the active --format flag, e.g.
+// "audit-results-2024-01-15.md". The file is placed inside outPath when it is
+// a directory, or in the current working directory when outPath is empty.
 func writeOutput(content, outPath string) error {
-	if outPath == "" {
+	resolved, err := resolveOutputPath(outPath, globalFlags.Format)
+	if err != nil {
+		return fmt.Errorf("write output: %w", err)
+	}
+
+	if resolved == "" {
 		fmt.Print(content)
 		return nil
 	}
-	if err := os.WriteFile(outPath, []byte(content), 0644); err != nil {
+
+	if err := os.WriteFile(resolved, []byte(content), 0644); err != nil {
 		return fmt.Errorf("write output: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "Report written to %s\n", outPath)
+	fmt.Fprintf(os.Stderr, "Report written to %s\n", resolved)
 	return nil
+}
+
+// resolveOutputPath returns the file path to write to. When outPath is empty
+// it returns an empty string (stdout). When outPath is an existing directory,
+// or is empty but a path was implied, a dated filename is generated. When
+// outPath is a specific file path it is returned unchanged.
+func resolveOutputPath(outPath, format string) (string, error) {
+	if outPath == "" {
+		return "", nil
+	}
+
+	info, err := os.Stat(outPath)
+	if err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat %s: %w", outPath, err)
+	}
+
+	// If the path exists and is a directory, generate a filename inside it.
+	if err == nil && info.IsDir() {
+		return filepath.Join(outPath, datedFilename(format)), nil
+	}
+
+	// Path does not exist or is a file — use it as-is.
+	return outPath, nil
+}
+
+// datedFilename returns a filename like "audit-results-2024-01-15.md" using
+// the current date and the extension that matches the given format.
+func datedFilename(format string) string {
+	ext := "txt"
+	switch format {
+	case "json":
+		ext = "json"
+	case "markdown":
+		ext = "md"
+	case "table":
+		ext = "txt"
+	}
+	date := time.Now().Format("2006-01-02")
+	return fmt.Sprintf("audit-results-%s.%s", date, ext)
 }

@@ -159,8 +159,9 @@ func currentPrefix(stack []string) string {
 }
 
 // joinPaths concatenates a prefix and a path, avoiding double slashes.
-// When path is empty (e.g. a bare @Post() with no sub-path), the prefix
-// itself is the full path and no trailing slash is appended.
+// When path is empty or "/" and a prefix is present (e.g. r.Get("/", handler)
+// inside a r.Route("/prefix", ...) block), the prefix itself is the full path
+// — no trailing slash is appended.
 func joinPaths(prefix, path string) string {
 	if prefix == "" {
 		if path == "" {
@@ -169,7 +170,9 @@ func joinPaths(prefix, path string) string {
 		return path
 	}
 	prefix = strings.TrimRight(prefix, "/")
-	if path == "" {
+	// A bare "/" inside a sub-route means the collection root — do not append
+	// the slash so that /articles/GET "/" becomes /articles, not /articles/.
+	if path == "" || path == "/" {
 		return prefix
 	}
 	if !strings.HasPrefix(path, "/") {
