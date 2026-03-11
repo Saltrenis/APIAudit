@@ -52,7 +52,7 @@ func init() {
 	pf.StringVar(&globalFlags.Dir, "dir", ".", "Target project directory")
 	pf.StringVar(&globalFlags.Repo, "repo", "", "Git repository URL to clone before running")
 	pf.StringVar(&globalFlags.Output, "output", "", "Write report to this file path instead of stdout")
-	pf.BoolVar(&globalFlags.AIAssist, "ai-assist", false, "Use Claude for ambiguous analysis (requires ANTHROPIC_API_KEY)")
+	pf.BoolVar(&globalFlags.AIAssist, "ai-assist", false, "Use local Claude Code CLI for annotation generation")
 	pf.StringVar(&globalFlags.Format, "format", "table", "Output format: table | json | markdown")
 	pf.BoolVar(&globalFlags.Beads, "beads", false, "Create beads issues for each finding")
 	pf.IntVar(&globalFlags.BeadsLimit, "beads-limit", 50, "Maximum number of beads issues to create per run (0 = unlimited)")

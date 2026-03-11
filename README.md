@@ -90,7 +90,7 @@ $ apiaudit audit --repo https://github.com/org/repo --beads --format json
 | `--output` | string | | Write report to a file instead of stdout |
 | `--format` | string | `table` | Output format: `table`, `json`, or `markdown` |
 | `--beads` | bool | `false` | Create beads issues for each finding |
-| `--ai-assist` | bool | `false` | Use Claude for ambiguous analysis (requires `ANTHROPIC_API_KEY`) |
+| `--ai-assist` | bool | `false` | Use Claude Code (local CLI) for annotation generation |
 | `--beads-limit` | int | `50` | Maximum number of beads issues to create per run (0 = unlimited) |
 
 ### `audit` Flags
@@ -129,18 +129,17 @@ The `init` command will set up beads tracking in the target project if the `bd` 
 
 ## Claude Integration
 
-The `annotate` command is the only part of APIAudit that uses AI. It calls the Anthropic API (Claude) to generate swagger annotations for routes that lack documentation, then inserts them into the correct location in your source files.
+The `annotate` command is the only part of APIAudit that uses AI. When `--ai-assist` is passed, it invokes your locally installed [Claude Code](https://claude.com/claude-code) CLI to generate swagger annotations for unannotated routes. No API key is needed -- it uses your existing Claude Code session.
 
-Everything else -- framework detection, route scanning, OpenAPI generation, analysis, and reporting -- is pure Go with no external API calls. The tool works fully offline for all commands except `annotate`.
-
-To use `annotate`, set the `ANTHROPIC_API_KEY` environment variable and pass the `--ai-assist` flag:
+Everything else -- framework detection, route scanning, OpenAPI generation, analysis, and reporting -- is pure Go with zero external calls. The tool works fully offline for all commands except `annotate --ai-assist`.
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+# With Claude Code installed locally
 apiaudit annotate --dir . --ai-assist
-```
 
-Without `--ai-assist`, the `annotate` command prints annotation templates to stdout for manual insertion.
+# Without Claude Code -- outputs route data for manual annotation
+apiaudit annotate --dir .
+```
 
 ## Contributing
 
