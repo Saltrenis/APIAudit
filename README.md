@@ -4,7 +4,11 @@ Zero-config API route scanner and auditor.
 
 APIAudit is a CLI tool that automatically detects your web framework, extracts every registered route from source code, generates an OpenAPI 3.0 specification, and reports inconsistencies between your backend API and frontend consumers. It supports Go, Node/TypeScript, and Python frameworks. Everything runs as pure Go static analysis -- no AI tokens are used except by the optional `annotate` command.
 
+APIAudit also ships with a **web-based wizard** that provides a guided UI for running audits, with real-time streaming output and structured results.
+
 ## Quick Start
+
+### Install
 
 ```bash
 # Install with Go
@@ -12,10 +16,32 @@ go install github.com/Saltrenis/APIAudit/cmd/apiaudit@latest
 
 # Or with Homebrew
 brew install saltrenis/tap/apiaudit
-
-# Audit your project
-apiaudit audit
 ```
+
+### CLI
+
+```bash
+# Audit the current directory
+apiaudit audit
+
+# Audit a specific project
+apiaudit audit --dir ~/my-project --format markdown --output audit.md
+
+# Audit a remote repo
+apiaudit audit --repo https://github.com/org/repo
+```
+
+### Web UI
+
+```bash
+# Install the web server
+go install github.com/Saltrenis/APIAudit/cmd/apiaudit-web@latest
+
+# Start the wizard (opens at http://127.0.0.1:8090)
+apiaudit-web
+```
+
+The web wizard walks you through project setup, command selection, and options -- then streams results in real-time with sortable route tables and findings grouped by severity.
 
 ## Supported Frameworks
 
@@ -140,6 +166,55 @@ apiaudit annotate --dir . --ai-assist
 # Without Claude Code -- outputs route data for manual annotation
 apiaudit annotate --dir .
 ```
+
+## Web UI
+
+APIAudit includes a browser-based wizard for users who prefer a graphical interface over the CLI.
+
+### Features
+
+- **Guided wizard** -- 5-step flow: pick your project source, choose a command, configure options, review, and run
+- **Real-time streaming** -- watch progress logs as the audit runs, with structured results when complete
+- **Sortable route table** -- filter by HTTP method, search by path, colored method badges
+- **Findings by severity** -- P1-P4 grouping with expandable suggestions and file locations
+- **Single binary** -- the frontend is embedded in the Go binary, no Node.js required at runtime
+
+### Running the Web UI
+
+```bash
+# From source
+cd ~/APIAudit
+make web        # builds frontend + Go server
+bin/apiaudit-web
+
+# With go install
+go install github.com/Saltrenis/APIAudit/cmd/apiaudit-web@latest
+apiaudit-web
+```
+
+Opens at `http://127.0.0.1:8090`. The server binds to localhost only.
+
+### Web Server Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | `8090` | Port to listen on |
+| `--bin` | auto-detect | Path to the `apiaudit` binary |
+| `--dev` | `false` | Serve frontend from disk (for development) |
+
+### Development
+
+To work on the frontend with hot-reload:
+
+```bash
+# Terminal 1: Start the Go API server
+cd ~/APIAudit && go run ./cmd/apiaudit-web --dev
+
+# Terminal 2: Start Vite dev server
+cd ~/APIAudit/frontend && npm run dev
+```
+
+Vite proxies `/api/*` requests to the Go server on port 8090.
 
 ## Contributing
 
