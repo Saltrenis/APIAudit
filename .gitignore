@@ -1,4 +1,6 @@
 bin/
+dist/
+/apiaudit
 *.exe
 *.dll
 *.so

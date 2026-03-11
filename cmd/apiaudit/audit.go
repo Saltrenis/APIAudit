@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Saltrenis/APIAudit/internal/analyze"
 	beadspkg "github.com/Saltrenis/APIAudit/internal/beads"
@@ -12,11 +15,13 @@ import (
 	"github.com/Saltrenis/APIAudit/internal/report"
 	"github.com/Saltrenis/APIAudit/internal/scan"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var auditFlags struct {
 	SkipFrontend bool
 	SkipGenerate bool
+	StaticOnly   bool
 	FrontendDir  string
 }
 
@@ -35,13 +40,15 @@ Examples:
   apiaudit audit --dir ./my-project
   apiaudit audit --dir . --format markdown --output audit.md
   apiaudit audit --dir . --beads            # create beads issues for findings
-  apiaudit audit --repo https://github.com/org/repo --format json`,
+  apiaudit audit --repo https://github.com/org/repo --format json
+  apiaudit audit --dir . --static-only      # coverage + consistency only, no frontend`,
 	RunE: runAudit,
 }
 
 func init() {
 	auditCmd.Flags().BoolVar(&auditFlags.SkipFrontend, "skip-frontend", false, "Skip frontend contract analysis")
 	auditCmd.Flags().BoolVar(&auditFlags.SkipGenerate, "skip-generate", false, "Skip OpenAPI spec generation")
+	auditCmd.Flags().BoolVar(&auditFlags.StaticOnly, "static-only", false, "Run coverage + consistency analysis only (no frontend prompt)")
 	auditCmd.Flags().StringVar(&auditFlags.FrontendDir, "frontend-dir", "", "Override detected frontend directory")
 	rootCmd.AddCommand(auditCmd)
 }
@@ -108,13 +115,41 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Step 4: Analyze.
+	//
+	// When no frontend is detected, warn the user and—unless --static-only was
+	// passed—ask whether to continue with static analysis or stop after
+	// reporting routes and the generated spec.
+	skipFrontend := auditFlags.SkipFrontend || auditFlags.StaticOnly
+
+	if !fw.HasFrontend && auditFlags.FrontendDir == "" && !skipFrontend {
+		fmt.Fprintln(cmd.ErrOrStderr(), "⚠ No frontend detected. API contract testing is designed for frontend↔backend comparison.")
+
+		runStatic, promptErr := promptStaticOnly(cmd)
+		if promptErr != nil {
+			return fmt.Errorf("audit: prompt: %w", promptErr)
+		}
+
+		if !runStatic {
+			// User declined static analysis: report routes and spec only.
+			reporter := buildReporter(globalFlags.Format)
+			output, repErr := reporter.Report(nil, routes, *fw)
+			if repErr != nil {
+				return fmt.Errorf("audit: report: %w", repErr)
+			}
+			return writeOutput(output, globalFlags.Output)
+		}
+
+		// User accepted: treat this run as static-only.
+		skipFrontend = true
+	}
+
 	fmt.Fprintln(cmd.ErrOrStderr(), "→ Analyzing...")
 	var findings []analyze.Finding
 
 	findings = append(findings, analyze.CheckCoverage(routes)...)
 	findings = append(findings, analyze.CheckConsistency(routes)...)
 
-	if !auditFlags.SkipFrontend {
+	if !skipFrontend {
 		frontendDir := auditFlags.FrontendDir
 		if frontendDir == "" && fw.HasFrontend {
 			frontendDir = filepath.Join(dir, fw.FrontendDir)
@@ -127,7 +162,7 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 
 	// Step 5: Optionally create beads issues.
 	if globalFlags.Beads {
-		if err := createBeadsIssues(findings, dir); err != nil {
+		if err := createBeadsIssues(cmd, findings, dir); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "  Warning: beads: %v\n", err)
 		}
 	}
@@ -142,6 +177,28 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 	return writeOutput(output, globalFlags.Output)
 }
 
+// promptStaticOnly prints the static-analysis prompt to stderr and reads a
+// single line from stdin. It returns true when the user accepts (or when stdin
+// is not an interactive terminal, in which case it defaults to yes).
+func promptStaticOnly(cmd *cobra.Command) (bool, error) {
+	// When stdin is not a terminal (e.g. piped), default to yes silently.
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return true, nil
+	}
+
+	fmt.Fprint(cmd.ErrOrStderr(), "Would you like to run static analysis only? [Y/n] ")
+
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("read input: %w", err)
+	}
+
+	answer := strings.TrimSpace(strings.ToLower(line))
+	// Empty input or explicit "y"/"yes" both mean yes.
+	return answer == "" || answer == "y" || answer == "yes", nil
+}
+
 // buildReporter returns the Reporter matching the given format string.
 func buildReporter(format string) report.Reporter {
 	switch format {
@@ -154,8 +211,9 @@ func buildReporter(format string) report.Reporter {
 	}
 }
 
-// createBeadsIssues creates a beads issue for every finding when bd is installed.
-func createBeadsIssues(findings []analyze.Finding, dir string) error {
+// createBeadsIssues groups findings, deduplicates against existing open issues,
+// respects the --beads-limit cap, and prints a summary when done.
+func createBeadsIssues(cmd *cobra.Command, findings []analyze.Finding, dir string) error {
 	if !beadspkg.IsInstalled() {
 		return fmt.Errorf("bd CLI not found in PATH — install beads to use --beads flag")
 	}
@@ -165,15 +223,14 @@ func createBeadsIssues(findings []analyze.Finding, dir string) error {
 		_ = beadspkg.Init(dir)
 	}
 
-	created := 0
-	for _, f := range findings {
-		if _, err := beadspkg.CreateIssue(f); err != nil {
-			fmt.Printf("  Warning: could not create beads issue: %v\n", err)
-			continue
-		}
-		created++
+	res, err := beadspkg.CreateIssues(findings, dir, globalFlags.BeadsLimit)
+	if err != nil {
+		return err
 	}
 
-	fmt.Printf("  Created %d beads issues\n", created)
+	fmt.Fprintf(cmd.ErrOrStderr(),
+		"Beads: created %d, skipped %d (duplicates), skipped %d (limit reached)\n",
+		res.Created, res.SkippedDupes, res.SkippedLimit)
+
 	return nil
 }

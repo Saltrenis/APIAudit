@@ -1,2 +1,154 @@
 # APIAudit
-This repository is a one stop shop for using Claude Code to add swagger documentation to your API, run tests against those API endpoints and validate that all requests and responses respond appropriately.
+
+Zero-config API route scanner and auditor.
+
+APIAudit is a CLI tool that automatically detects your web framework, extracts every registered route from source code, generates an OpenAPI 3.0 specification, and reports inconsistencies between your backend API and frontend consumers. It supports Go, Node/TypeScript, and Python frameworks. Everything runs as pure Go static analysis -- no AI tokens are used except by the optional `annotate` command.
+
+## Quick Start
+
+```bash
+# Install with Go
+go install github.com/Saltrenis/APIAudit/cmd/apiaudit@latest
+
+# Or with Homebrew
+brew install saltrenis/tap/apiaudit
+
+# Audit your project
+apiaudit audit
+```
+
+## Supported Frameworks
+
+| Language | Frameworks | Detection File |
+|----------|-----------|----------------|
+| Go | Gin, Echo, Chi, Fiber, net/http (stdlib) | go.mod |
+| Node / TypeScript | Express, NestJS, Fastify, Koa | package.json |
+| Python | FastAPI, Flask, Django REST Framework | requirements.txt, pyproject.toml |
+
+When multiple frameworks are present, APIAudit uses a priority-weighted scoring system to select the best match and reports a confidence value.
+
+## Commands
+
+- **detect** -- Identify the project's language, web framework, version, and whether a frontend or existing swagger spec is present.
+- **scan** -- Walk the source tree and extract every registered route with HTTP method, path, handler name, source file, and line number.
+- **generate** -- Produce an OpenAPI 3.0 specification in YAML or JSON from the scanned routes.
+- **audit** -- Run the full pipeline: detect, scan, generate, analyze, and report. This is the primary command.
+- **annotate** -- Generate swagger annotations for undocumented routes. Uses Claude when `--ai-assist` is set; otherwise prints templates to stdout.
+- **init** -- Create an `.apiaudit.json` config file in the target project. Optionally initializes beads issue tracking.
+
+## Usage Examples
+
+Detect the framework in the current directory:
+
+```bash
+$ apiaudit detect
+Language:    Go
+Framework:   chi
+Version:     v5.0.11
+Confidence:  1.00
+Has Frontend: true (frontend/)
+Has Swagger:  true
+```
+
+Scan and list all routes as a table:
+
+```bash
+$ apiaudit scan --dir ./my-api --format table
+METHOD  PATH                    HANDLER              FILE                          LINE
+GET     /v1/users               userapi.GetAll       api/domain/http/userapi/...   42
+POST    /v1/users               userapi.Create       api/domain/http/userapi/...   87
+GET     /v1/users/:id           userapi.GetByID      api/domain/http/userapi/...   63
+DELETE  /v1/users/:id           userapi.Delete       api/domain/http/userapi/...   105
+```
+
+Generate an OpenAPI spec:
+
+```bash
+$ apiaudit generate --dir . --title "My API" --api-version "2.0.0" --output openapi.yaml
+```
+
+Run a full audit and write findings as markdown:
+
+```bash
+$ apiaudit audit --dir ./my-project --format markdown --output audit.md
+```
+
+Audit a remote repository and create beads issues for each finding:
+
+```bash
+$ apiaudit audit --repo https://github.com/org/repo --beads --format json
+```
+
+## Flags Reference
+
+### Global Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--dir` | string | `.` | Target project directory |
+| `--repo` | string | | Git repository URL to clone before running |
+| `--output` | string | | Write report to a file instead of stdout |
+| `--format` | string | `table` | Output format: `table`, `json`, or `markdown` |
+| `--beads` | bool | `false` | Create beads issues for each finding |
+| `--ai-assist` | bool | `false` | Use Claude for ambiguous analysis (requires `ANTHROPIC_API_KEY`) |
+| `--beads-limit` | int | `50` | Maximum number of beads issues to create per run (0 = unlimited) |
+
+### `audit` Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--static-only` | bool | `false` | Run coverage and consistency analysis only (no frontend) |
+| `--skip-generate` | bool | `false` | Skip OpenAPI spec generation step |
+| `--skip-frontend` | bool | `false` | Skip frontend contract analysis |
+| `--frontend-dir` | string | | Override the auto-detected frontend directory |
+
+### `generate` Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--title` | string | directory name | API title in the generated spec |
+| `--api-version` | string | `1.0.0` | API version string |
+| `--description` | string | | API description |
+| `--json` | bool | `false` | Write JSON instead of YAML |
+
+## Output Formats
+
+APIAudit supports three output formats controlled by the `--format` flag:
+
+- **table** (default) -- Compact columnar output for terminal use.
+- **json** -- Structured JSON, suitable for piping into `jq` or other tools.
+- **markdown** -- GitHub-flavored markdown, useful for audit reports or pasting into issues.
+
+All formats can be written to a file with `--output` or printed to stdout.
+
+## Beads Integration
+
+The `--beads` flag integrates with the [beads](https://github.com/Saltrenis/beads) issue tracker. When enabled, APIAudit creates one beads issue per finding, grouped by category and file, with automatic deduplication. Use `--beads-limit` to cap the number of issues created per run.
+
+The `init` command will set up beads tracking in the target project if the `bd` CLI is installed.
+
+## Claude Integration
+
+The `annotate` command is the only part of APIAudit that uses AI. It calls the Anthropic API (Claude) to generate swagger annotations for routes that lack documentation, then inserts them into the correct location in your source files.
+
+Everything else -- framework detection, route scanning, OpenAPI generation, analysis, and reporting -- is pure Go with no external API calls. The tool works fully offline for all commands except `annotate`.
+
+To use `annotate`, set the `ANTHROPIC_API_KEY` environment variable and pass the `--ai-assist` flag:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+apiaudit annotate --dir . --ai-assist
+```
+
+Without `--ai-assist`, the `annotate` command prints annotation templates to stdout for manual insertion.
+
+## Contributing
+
+1. Fork the repository and create a feature branch.
+2. Make your changes. Run `go fmt ./...` and `go vet ./...` before committing.
+3. Commit with a prefix: `[feat]`, `[bug]`, or `[chore]`.
+4. Open a pull request against `main`.
+
+## License
+
+See [LICENSE](LICENSE) for details.

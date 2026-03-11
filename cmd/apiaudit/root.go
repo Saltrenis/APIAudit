@@ -10,12 +10,13 @@ import (
 
 // globalFlags holds values bound to the persistent global flags.
 var globalFlags struct {
-	Dir      string
-	Repo     string
-	Output   string
-	AIAssist bool
-	Format   string
-	Beads    bool
+	Dir        string
+	Repo       string
+	Output     string
+	AIAssist   bool
+	Format     string
+	Beads      bool
+	BeadsLimit int
 }
 
 // rootCmd is the base command. All sub-commands are attached to it.
@@ -49,4 +50,5 @@ func init() {
 	pf.BoolVar(&globalFlags.AIAssist, "ai-assist", false, "Use Claude for ambiguous analysis (requires ANTHROPIC_API_KEY)")
 	pf.StringVar(&globalFlags.Format, "format", "table", "Output format: table | json | markdown")
 	pf.BoolVar(&globalFlags.Beads, "beads", false, "Create beads issues for each finding")
+	pf.IntVar(&globalFlags.BeadsLimit, "beads-limit", 50, "Maximum number of beads issues to create per run (0 = unlimited)")
 }

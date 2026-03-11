@@ -19,16 +19,37 @@ func (s *FastAPIScanner) Name() string { return "fastapi" }
 //	@app.get("/path")
 //	@router.post("/path")
 //	@app.get("/path", response_model=SomeModel)
+//	@router.get(
+//	    "/path",
+//	    dependencies=[...],
+//	)
 //	router = APIRouter(prefix="/prefix")
 var (
+	// fastapiRouteRe matches a route decorator in a single string (which may be
+	// a joined multi-line decorator).  The path may use single or double quotes.
 	fastapiRouteRe = regexp.MustCompile(
 		`@(?:\w+)\.(get|post|put|delete|patch|head|options)\s*\(\s*["']([^"']+)["']`,
 	)
+
+	// fastapiDecoratorStartRe detects the opening of a route decorator so that
+	// multi-line forms can be collected before applying fastapiRouteRe.
+	fastapiDecoratorStartRe = regexp.MustCompile(
+		`@(?:\w+)\.(get|post|put|delete|patch|head|options)\s*\(`,
+	)
+
+	// fastapiRouterPrefixRe matches a single-line APIRouter declaration that
+	// includes a prefix keyword argument.
 	fastapiRouterPrefixRe = regexp.MustCompile(
 		`APIRouter\s*\([^)]*prefix\s*=\s*["']([^"']+)["']`,
 	)
+
+	// fastapiRouterPrefixMultiRe is used on joined multi-line APIRouter blocks
+	// where the [^)]* look-ahead would span too many lines.
+	fastapiRouterPrefixMultiRe = regexp.MustCompile(
+		`prefix\s*=\s*["']([^"']+)["']`,
+	)
+
 	fastapiDefRe = regexp.MustCompile(`(?:async\s+)?def\s+(\w+)\s*\(`)
-	pySwaggerRe  = regexp.MustCompile(`@\w+\.(get|post|put|delete|patch)`)
 )
 
 // Scan implements Scanner.
@@ -65,29 +86,35 @@ func scanFastAPIFile(path string) ([]Route, error) {
 	defer f.Close()
 
 	var lines []string
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		lines = append(lines, sc.Text())
 	}
-	if err := scanner.Err(); err != nil {
+	if err := sc.Err(); err != nil {
 		return nil, err
 	}
 
-	// Detect router prefix for this file.
-	prefix := ""
-	for _, line := range lines {
-		if m := fastapiRouterPrefixRe.FindStringSubmatch(line); m != nil {
-			prefix = m[1]
-			break
-		}
-	}
+	// Detect router prefix for this file, handling both single-line and
+	// multi-line APIRouter(...) declarations.
+	prefix := detectFARouterPrefix(lines)
 
 	var routes []Route
-	for i, line := range lines {
-		lineNum := i + 1
-		trimmed := strings.TrimSpace(line)
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
 
-		m := fastapiRouteRe.FindStringSubmatch(trimmed)
+		// Fast-path: skip lines that cannot start a route decorator.
+		if !fastapiDecoratorStartRe.MatchString(trimmed) {
+			continue
+		}
+
+		lineNum := i + 1
+
+		// Collect the full decorator text.  For single-line forms this is just
+		// the line itself.  For multi-line forms we join continuation lines
+		// until the opening parenthesis is balanced.
+		decoratorText, decoratorEnd := faCollectDecoratorLines(lines, i)
+
+		m := fastapiRouteRe.FindStringSubmatch(decoratorText)
 		if m == nil {
 			continue
 		}
@@ -95,9 +122,9 @@ func scanFastAPIFile(path string) ([]Route, error) {
 		method := strings.ToUpper(m[1])
 		routePath := joinPaths(prefix, m[2])
 
-		// Find the function definition immediately following the decorator.
+		// Find the function definition immediately following the decorator block.
 		handler := ""
-		for j := i + 1; j < len(lines) && j < i+4; j++ {
+		for j := decoratorEnd + 1; j < len(lines) && j < decoratorEnd+5; j++ {
 			if mm := fastapiDefRe.FindStringSubmatch(strings.TrimSpace(lines[j])); mm != nil {
 				handler = mm[1]
 				break
@@ -110,11 +137,75 @@ func scanFastAPIFile(path string) ([]Route, error) {
 			Handler:    handler,
 			File:       path,
 			Line:       lineNum,
-			HasSwagger: false, // FastAPI generates docs automatically; no manual annotations needed.
+			HasSwagger: false, // FastAPI generates docs automatically.
 		})
+
+		// Advance past the decorator block to avoid double-counting.
+		i = decoratorEnd
 	}
 
 	return routes, nil
+}
+
+// faCollectDecoratorLines returns the full decorator text (lines joined with a
+// single space) and the index of the last line that belongs to the decorator.
+// It stops when the opening parenthesis opened on startIdx is balanced, or when
+// a def/async def is encountered (which already belongs to the next statement).
+func faCollectDecoratorLines(lines []string, startIdx int) (string, int) {
+	var sb strings.Builder
+	depth := 0
+
+	for i := startIdx; i < len(lines) && i < startIdx+20; i++ {
+		text := strings.TrimSpace(lines[i])
+
+		// A def/async def on any line after the first means the decorator ended
+		// on the previous line (open paren count must have reached zero).
+		if i > startIdx && fastapiDefRe.MatchString(text) {
+			return sb.String(), i - 1
+		}
+
+		if sb.Len() > 0 {
+			sb.WriteByte(' ')
+		}
+		sb.WriteString(text)
+
+		for _, ch := range text {
+			switch ch {
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+		}
+
+		if depth <= 0 {
+			return sb.String(), i
+		}
+	}
+
+	return sb.String(), startIdx
+}
+
+// detectFARouterPrefix searches lines for an APIRouter prefix, handling both
+// single-line and multi-line APIRouter(...) declarations.
+func detectFARouterPrefix(lines []string) string {
+	for i, line := range lines {
+		if !strings.Contains(line, "APIRouter") {
+			continue
+		}
+
+		// Single-line match first (most common).
+		if m := fastapiRouterPrefixRe.FindStringSubmatch(line); m != nil {
+			return m[1]
+		}
+
+		// Multi-line: join the APIRouter(...) block and search within it.
+		joined, _ := faCollectDecoratorLines(lines, i)
+		if m := fastapiRouterPrefixMultiRe.FindStringSubmatch(joined); m != nil {
+			return m[1]
+		}
+	}
+	return ""
 }
 
 // isPythonFile reports whether path is a Python source file.
