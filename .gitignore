@@ -1,0 +1,12 @@
+bin/
+dist/
+/apiaudit
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+.env
+.DS_Store
+.apiaudit-annotate.json
