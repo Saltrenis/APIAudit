@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/Saltrenis/APIAudit/blob/main/docs/getting-started.md
+    about: Check the getting started guide before opening an issue
