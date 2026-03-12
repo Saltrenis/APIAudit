@@ -57,18 +57,38 @@ func (r *MarkdownReporter) Report(findings []analyze.Finding, routes []scan.Rout
 	sb.WriteString(fmt.Sprintf("| P4 | %d |\n", p4))
 	sb.WriteString("\n")
 
-	// Routes table.
-	sb.WriteString("## Routes\n\n")
-	sb.WriteString("| Method | Path | Handler | File | Swagger |\n|---|---|---|---|---|\n")
-	for _, route := range routes {
-		swagger := "No"
-		if route.HasSwagger {
-			swagger = "Yes"
+	// Routes with issues table.
+	routesWithFindings := make(map[string]struct{})
+	for _, f := range findings {
+		if f.Route != nil {
+			routesWithFindings[f.Route.Method+"|"+f.Route.Path] = struct{}{}
 		}
-		sb.WriteString(fmt.Sprintf("| `%s` | `%s` | `%s` | `%s:%d` | %s |\n",
-			route.Method, route.Path, route.Handler, shortPath(route.File), route.Line, swagger))
 	}
-	sb.WriteString("\n")
+
+	sb.WriteString("## Routes with Issues\n\n")
+	sb.WriteString("_Only routes with findings are shown. See Swagger for the complete endpoint list._\n\n")
+
+	var issueRoutes []scan.Route
+	for _, route := range routes {
+		if _, ok := routesWithFindings[route.Method+"|"+route.Path]; ok {
+			issueRoutes = append(issueRoutes, route)
+		}
+	}
+
+	if len(issueRoutes) == 0 {
+		sb.WriteString("No routes with issues found.\n\n")
+	} else {
+		sb.WriteString("| Method | Path | Handler | File | Swagger |\n|---|---|---|---|---|\n")
+		for _, route := range issueRoutes {
+			swagger := "No"
+			if route.HasSwagger {
+				swagger = "Yes"
+			}
+			sb.WriteString(fmt.Sprintf("| `%s` | `%s` | `%s` | `%s:%d` | %s |\n",
+				route.Method, route.Path, route.Handler, shortPath(route.File), route.Line, swagger))
+		}
+		sb.WriteString("\n")
+	}
 
 	// Findings by category.
 	if len(findings) == 0 {
