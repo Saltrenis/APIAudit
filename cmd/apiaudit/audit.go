@@ -23,6 +23,7 @@ var auditFlags struct {
 	SkipGenerate bool
 	StaticOnly   bool
 	FrontendDir  string
+	LiveBaseURL  string
 }
 
 var auditCmd = &cobra.Command{
@@ -50,6 +51,7 @@ func init() {
 	auditCmd.Flags().BoolVar(&auditFlags.SkipGenerate, "skip-generate", false, "Skip OpenAPI spec generation")
 	auditCmd.Flags().BoolVar(&auditFlags.StaticOnly, "static-only", false, "Run coverage + consistency analysis only (no frontend prompt)")
 	auditCmd.Flags().StringVar(&auditFlags.FrontendDir, "frontend-dir", "", "Override detected frontend directory")
+	auditCmd.Flags().StringVar(&auditFlags.LiveBaseURL, "live", "", "Base URL to test endpoints against (e.g. http://localhost:3000)")
 	rootCmd.AddCommand(auditCmd)
 }
 
@@ -160,14 +162,22 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintf(cmd.ErrOrStderr(), "  Found %d findings\n", len(findings))
 
-	// Step 5: Optionally create beads issues.
+	// Step 5: Live endpoint testing.
+	if auditFlags.LiveBaseURL != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "→ Live testing endpoints...")
+		liveFindings := analyze.CheckLive(routes, auditFlags.LiveBaseURL)
+		findings = append(findings, liveFindings...)
+		fmt.Fprintf(cmd.ErrOrStderr(), "  Tested %d endpoints, found %d issues\n", len(routes), len(liveFindings))
+	}
+
+	// Step 6: Optionally create beads issues.
 	if globalFlags.Beads {
 		if err := createBeadsIssues(cmd, findings, dir); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "  Warning: beads: %v\n", err)
 		}
 	}
 
-	// Step 6: Report.
+	// Step 7: Report.
 	reporter := buildReporter(globalFlags.Format)
 	output, err := reporter.Report(findings, routes, *fw)
 	if err != nil {
